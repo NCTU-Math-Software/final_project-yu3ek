@@ -14,6 +14,6 @@ final_project-yu3ek created by GitHub Classroom
 
 5.把s1,s2,s3相加叫stotal
 
-6.如果s跟stotal一樣，原點就是內部的點
+6.如果s跟stotal一樣，原點就是內部的點，反之就是外部的點
 
 7.把圖秀出來檢查
