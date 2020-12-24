@@ -2,7 +2,7 @@
 final_project-yu3ek created by GitHub Classroom
 
 
-# 第五個project，題目是在圖上隨意點三個點，判斷圓點是否在三個點連成的三角形內部
+## 第五個project，題目是在圖上隨意點三個點，判斷圓點是否在三個點連成的三角形內部
 # 作法:
 1.先在圖上輸入三個點，座標為(x1,y1),(x2,y2),(x3,y3)
 
@@ -17,3 +17,8 @@ final_project-yu3ek created by GitHub Classroom
 6.如果s跟stotal一樣，原點就是內部的點，反之就是外部的點
 
 7.把圖秀出來檢查
+
+# 執行方式
+在圖上隨意選三個點，會輸出原點是否在三角形內
+
+同時會畫出由三個點形成的紅色三角形，並且原點會用藍色點表示
