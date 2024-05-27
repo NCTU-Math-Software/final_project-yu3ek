@@ -1,0 +1,290 @@
+-- 刪除已存在的臨時表
+DROP TABLE IF EXISTS #EXRATE
+DROP TABLE IF EXISTS #F1
+DROP TABLE IF EXISTS #FINAL
+
+-- 宣告日期變數
+DECLARE @DATE1 AS DATE, @DATE2 AS DATE, @DATE3 AS DATE, @DATE4 AS DATE, @DATE5 AS DATE
+DECLARE @yearIndex INT = 1
+
+-- 設定日期變數
+SET @DATE1 = DATEFROMPARTS(2019,1,1)   
+SET @DATE2 = DATEFROMPARTS(2020,1,1) 
+SET @DATE3 = DATEFROMPARTS(2021,1,1)   
+SET @DATE4 = DATEFROMPARTS(2022,1,1) 
+SET @DATE5 = DATEFROMPARTS(2023,1,1)   
+
+-- 建立匯率表
+CREATE TABLE #EXRATE
+(
+    幣別 VARCHAR(20),
+    匯率 FLOAT(20)
+)
+
+-- 插入匯率資料
+INSERT INTO #EXRATE VALUES ('AUD', 20.9267), ('CNY', 4.3734), ('EUR', 34.1175), ('USD', 31.2705), ('NTD', 1)
+
+-- 動態 SQL 建立臨時表 F1
+DECLARE @sql NVARCHAR(MAX) = '
+    SELECT DISTINCT 
+        保單號碼,
+        BR_CODE,
+        BR生效日,
+        被保人生日,
+        性別,
+        險種,
+        通路,
+        狀態,
+        異動日西元年,
+        CASE 
+            WHEN 狀態 = ''F'' THEN DATEADD(MONTH, -26, 異動日西元年)
+            ELSE 異動日西元年 
+        END AS 狀態異動日,
+        保額(換算台幣),
+        繳別,
+        表定年繳(換算台幣),
+        公司別,
+        險種分類,
+        RBC分類,
+        Misc分類,
+        表定分期繳,
+        IES繳別CODE,
+        幣別,
+        簡碼
+    INTO #F1
+    FROM (
+        SELECT 
+            T1.S1701 AS 保單號碼,
+            T1.S1702 AS BR_CODE,
+            DATEFROMPARTS(CAST(SUBSTRING(CAST(T1.S1703 AS VARCHAR), 1, LEN(T1.S1703) - 4) + 1911 AS INT), CAST(SUBSTRING(CAST(T1.S1703 AS VARCHAR), LEN(T1.S1703) - 3, 2) AS INT), CAST(RIGHT(T1.S1703, 2) AS INT)) AS BR生效日,
+            DATEFROMPARTS(CAST(SUBSTRING(CAST(T1.S1704 AS VARCHAR), 1, LEN(T1.S1704) - 4) + 1911 AS INT), CAST(SUBSTRING(CAST(T1.S1704 AS VARCHAR), LEN(T1.S1704) - 3, 2) AS INT), CAST(RIGHT(T1.S1704, 2) AS INT)) AS 被保人生日,
+            T1.S1705 AS 性別,
+            T1.S1706 AS 險種,
+            T1.S1707 AS 通路,
+            T1.S1708 AS 狀態,
+            DATEFROMPARTS(CAST(SUBSTRING(CAST(T1.S1709 AS VARCHAR), 1, LEN(T1.S1709) - 4) + 1911 AS INT), CAST(SUBSTRING(CAST(T1.S1709 AS VARCHAR), LEN(T1.S1709) - 3, 2) AS INT), CAST(RIGHT(T1.S1709, 2) AS INT)) AS 異動日西元年,
+            T1.S1710 * EXRATE.匯率 AS 保額(換算台幣),
+            T1.S1710 AS 保額,
+            T1.S1711 AS 繳別,
+            T1.S1712 AS 表定年繳保費,
+            T1.S1712 * EXRATE.匯率 AS 表定年繳(換算台幣),
+            CASE 
+                WHEN T1.S1707 = ''Z'' THEN ''Z''
+                ELSE ''F''
+            END AS 公司別,
+            CASE 
+                WHEN T1.S1706 LIKE ''U%'' THEN ''萬能險''
+                WHEN T2.ALPHC = ''A'' THEN ''年金險''
+                WHEN T2.ALPHC = ''P'' THEN ''傷害險''
+                WHEN T2.ALPHC = ''H'' THEN ''醫療險''
+                WHEN T2.ALPHC = ''C'' THEN ''癌症險''
+                WHEN T2.PDE = ''P'' THEN ''生存險''
+                WHEN T2.PDE = ''D'' THEN ''死亡險''
+                WHEN T2.PDE = ''E'' THEN ''生死合險''
+            END AS 險種分類,
+            T2.ALPHC,
+            T2.PDE,
+            T2.RBC分類,
+            CASE 
+                WHEN T2.RBC分類 = ''終身'' THEN 1
+                WHEN T2.RBC分類 = ''定期'' THEN 2
+                WHEN T2.RBC分類 = ''養老'' THEN 3
+                WHEN T2.RBC分類 = ''還本'' THEN 4
+                WHEN T2.RBC分類 = ''生存'' THEN 5
+                WHEN T2.RBC分類 = ''醫療險'' THEN 6
+                WHEN T2.RBC分類 = ''癌症險'' THEN 7
+                WHEN T2.RBC分類 = ''年金險'' THEN 8
+                ELSE 9 
+            END AS Misc分類,
+            CASE 
+                WHEN T1.S1711 = ''A'' THEN T1.S1712 * EXRATE.匯率
+                WHEN T1.S1711 = ''M'' THEN T1.S1712 * EXRATE.匯率 * 0.88
+                WHEN T1.S1711 = ''Q'' THEN T1.S1712 * EXRATE.匯率 * 0.262
+                WHEN T1.S1711 = ''S'' THEN T1.S1712 * EXRATE.匯率 * 0.52
+            END + 0.5 AS 表定分期繳,
+            CASE 
+                WHEN T1.S1711 = ''A'' THEN 1
+                WHEN T1.S1711 = ''S'' THEN 2
+                WHEN T1.S1711 = ''Q'' THEN 4
+                WHEN T1.S1711 = ''M'' THEN 12
+                ELSE 0 
+            END AS IES繳別CODE,
+            T2.險別分類,
+            T2.LS,
+            T2.幣別,
+            T2.簡碼
+        FROM [ESMM].[dbo].[0208_STAA17PF_20240113_125500] AS T1
+        LEFT JOIN [ESMM].[dbo].[0209_PRODUCTTYPE01_20240401_120000] AS T2 
+            ON (CASE WHEN T1.S1707 = ''Z'' THEN ''Z'' ELSE ''F'' END) = T2.公司代碼 
+            AND T1.S1706 = T2.PLAN
+        LEFT JOIN #EXRATE AS EXRATE 
+            ON T2.幣別 = EXRATE.幣別
+    ) AS F1
+    WHERE F1.簡碼 = ''HG1''
+    AND F1.險種 NOT LIKE ''V%''
+    AND F1.險種 NOT LIKE ''UL%''
+    AND F1.狀態 NOT IN (''C'', ''K'', ''N'', ''H'', ''O'')
+'
+EXEC sp_executesql @sql
+
+-- 動態生成曝露數計算語句
+DECLARE @sqlExposure NVARCHAR(MAX) = ''
+
+WHILE @yearIndex <= 5
+BEGIN
+    SET @sqlExposure = @sqlExposure + '
+    SELECT DISTINCT 
+        F3.保單號碼, F3.險種, F3.被保人生日, F3.投保年齡, F3.狀態, F3.狀態異動日, F3.BR生效日, F3.表定年繳(換算台幣),
+        CASE 
+            WHEN F3.狀態 IN (''I'', ''J'', ''M'', ''P'', ''T'', ''Y'') THEN ''Y''
+            WHEN F3.狀態異動日 >= DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '),1,1) THEN ''Y''
+            ELSE ''N''
+        END AS Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_件數,
+        -- 其他曝露數計算欄位
+        CAST(F3.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_曝露數1 AS FLOAT) / 
+        (DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '),1,1), 
+                DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '),12,31)) + 1) AS Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_EXPOSURE1,
+        CAST(F3.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_曝露數2 AS FLOAT) / 
+        (DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '),1,1), 
+        DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '),12,31)) + 1) AS Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_EXPOSURE2,
+        CAST(F3.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_曝露數1 AS FLOAT) / 
+        (DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '),1,1), 
+        DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '),12,31)) + 1) * F3.表定年繳(換算台幣) AS Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_ANNUAL_PERM1,
+        CAST(F3.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_曝露數2 AS FLOAT) / 
+        (DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '),1,1), 
+        DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '),12,31)) + 1) * F3.表定年繳(換算台幣) AS Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_ANNUAL_PERM2
+    INTO #FINAL' + CAST(@yearIndex AS NVARCHAR(10)) + '
+    FROM (
+        SELECT F2.*,
+            CASE WHEN F2.狀態 IN (''A'',''D'',''W'') THEN ''Y''
+                 ELSE ''N'' 
+            END AS 狀態_死亡,
+            CASE WHEN F2.狀態 IN (''E'',''F'',''L'',''R'',''S'') THEN ''Y''
+                 ELSE ''N'' 
+            END AS 狀態_Lapsed,
+            YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') AS Y' + CAST(@yearIndex AS NVARCHAR(10)) + ',
+            YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') - YEAR(F2.BR生效日) + F2.投保年齡 - 1 AS Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1,
+            YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') - YEAR(F2.BR生效日) + F2.投保年齡 AS Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2,
+            -- 其他曝露數計算的公式部分，依次重複
+            CASE WHEN YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') < YEAR(F2.BR生效日) THEN 0
+                 WHEN YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') = YEAR(F2.BR生效日) THEN 0
+                 WHEN YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') > YEAR(F2.BR生效日) THEN CASE
+                     WHEN F2.狀態異動日 = ''1911-01-01'' THEN DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), 1, 1), DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)))
+                     WHEN YEAR(F2.狀態異動日) < YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') THEN 0
+                     WHEN YEAR(F2.狀態異動日) = YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') THEN CASE 
+                         WHEN F2.狀態異動日 >= DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)) THEN DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), 1, 1), DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)))
+                         WHEN F2.狀態異動日 < DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)) THEN DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), 1, 1), F2.狀態異動日)
+                     END
+                     WHEN YEAR(F2.狀態異動日) > YEAR(DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), 12, 31)) THEN DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), 1, 1), DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)))
+                 END
+            END AS Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_曝露數1,
+            CASE WHEN YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') < YEAR(F2.BR生效日) THEN 0
+                 WHEN YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') = YEAR(F2.BR生效日) THEN CASE 
+                     WHEN F2.狀態異動日 = ''1911-01-01'' THEN DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)), DATEFROMPARTS(YEAR(@yearIndex), 12, 31)) + 1
+                     WHEN YEAR(F2.狀態異動日) = YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') THEN DATEDIFF(DAY, F2.BR生效日, F2.狀態異動日)
+                     WHEN YEAR(F2.狀態異動日) > YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') THEN DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)), DATEFROMPARTS(YEAR(@yearIndex), 12, 31)) + 1
+                 END
+                 WHEN YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + ') > YEAR(F2.BR生效日) THEN CASE
+                     WHEN F2.狀態異動日 = ''1911-01-01'' THEN DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)), DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), 12, 31)) + 1
+                     WHEN YEAR(F2.狀態異動日) < YEAR(DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), 1, 1)) THEN 0
+                     WHEN YEAR(F2.狀態異動日) = YEAR(DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), 1, 1)) THEN CASE 
+                         WHEN F2.狀態異動日 >= DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)) THEN DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)),
+                         WHEN F2.狀態異動日 >= DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)) THEN DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)), F2.狀態異動日)
+                         WHEN F2.狀態異動日 < DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)) THEN 0
+                     END
+                     WHEN YEAR(F2.狀態異動日) > YEAR(DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), 12, 31)) THEN DATEDIFF(DAY, DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), MONTH(F2.BR生效日), DAY(F2.BR生效日)), DATEFROMPARTS(YEAR(@DATE' + CAST(@yearIndex AS NVARCHAR(10)) + '), 12, 31)) + 1
+                 END
+            END AS Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_曝露數2
+        FROM #F1 F2
+    ) AS F3
+
+    SELECT T2.AttainedAge, SUM(T2.件數) AS 件數
+    FROM (
+        SELECT 
+            CASE 
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 0 AND 19 THEN ''0-19''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 20 AND 24 THEN ''20-24''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 25 AND 29 THEN ''25-29''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 30 AND 34 THEN ''30-34''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 35 AND 39 THEN ''35-39''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 40 AND 44 THEN ''40-44''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 45 AND 49 THEN ''45-49''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 50 AND 54 THEN ''50-54''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 55 AND 59 THEN ''55-59''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 60 AND 64 THEN ''60-64''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 65 AND 69 THEN ''65-69''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 70 AND 74 THEN ''70-74''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 75 AND 79 THEN ''75-79''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 80 AND 120 THEN ''80-120''
+                ELSE ''Unknown''
+            END AS AttainedAge,
+            SUM(T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_EXPOSURE1) AS 件數
+        FROM #FINAL' + CAST(@yearIndex AS NVARCHAR(10)) + ' AS T1
+        WHERE T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_件數 = ''Y'' 
+          AND T1.狀態 NOT IN (''A'', ''D'', ''S'')
+        GROUP BY 
+            CASE 
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 0 AND 19 THEN ''0-19''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 20 AND 24 THEN ''20-24''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 25 AND 29 THEN ''25-29''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 30 AND 34 THEN ''30-34''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 35 AND 39 THEN ''35-39''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 40 AND 44 THEN ''40-44''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 45 AND 49 THEN ''45-49''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 50 AND 54 THEN ''50-54''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 55 AND 59 THEN ''55-59''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 60 AND 64 THEN ''60-64''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 65 AND 69 THEN ''65-69''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 70 AND 74 THEN ''70-74''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 75 AND 79 THEN ''75-79''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE1 BETWEEN 80 AND 120 THEN ''80-120''
+                ELSE ''Unknown''
+            END
+        UNION ALL
+        SELECT 
+            CASE 
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 0 AND 19 THEN ''0-19''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 20 AND 24 THEN ''20-24''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 25 AND 29 THEN ''25-29''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 30 AND 34 THEN ''30-34''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 35 AND 39 THEN ''35-39''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 40 AND 44 THEN ''40-44''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 45 AND 49 THEN ''45-49''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 50 AND 54 THEN ''50-54''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 55 AND 59 THEN ''55-59''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 60 AND 64 THEN ''60-64''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 65 AND 69 THEN ''65-69''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 70 AND 74 THEN ''70-74''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 75 AND 79 THEN ''75-79''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 80 AND 120 THEN ''80-120''
+                ELSE ''Unknown''
+            END AS AttainedAge,
+            SUM(T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_EXPOSURE2) AS 件數
+        FROM #FINAL' + CAST(@yearIndex AS NVARCHAR(10)) + ' AS T1
+        WHERE T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_件數 = ''Y'' 
+          AND T1.狀態 NOT IN (''A'', ''D'', ''S'')
+        GROUP BY 
+            CASE 
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 0 AND 19 THEN ''0-19''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 20 AND 24 THEN ''20-24''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 25 AND 29 THEN ''25-29''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 30 AND 34 THEN ''30-34''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 35 AND 39 THEN ''35-39''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 40 AND 44 THEN ''40-44''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 45 AND 49 THEN ''45-49''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 50 AND 54 THEN ''50-54''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 55 AND 59 THEN ''55-59''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 60 AND 64 THEN ''60-64''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 65 AND 69 THEN ''65-69''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 70 AND 74 THEN ''70-74''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 75 AND 79 THEN ''75-79''
+                WHEN T1.Y' + CAST(@yearIndex AS NVARCHAR(10)) + '_AGE2 BETWEEN 80 AND 120 THEN ''80-120''
+                ELSE ''Unknown''
+            END
+    ) AS T2
+    GROUP BY T2.AttainedAge;'
+    SET @yearIndex = @yearIndex + 1
+END
+
+EXEC sp_executesql @sqlExposure
+
